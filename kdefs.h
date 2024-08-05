@@ -1,0 +1,1 @@
+#define PA_TO_PAGE_ADR_MASK 0xfffffffffffff000UL
