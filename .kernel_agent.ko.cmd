@@ -1,0 +1,1 @@
+cmd_/home/neo/smu/tdx/WKDIR/kernel-agent-tdx/kernel_agent.ko := ld -r -m elf_x86_64  -z max-page-size=0x200000 -T ./scripts/module-common.lds --build-id  -o /home/neo/smu/tdx/WKDIR/kernel-agent-tdx/kernel_agent.ko /home/neo/smu/tdx/WKDIR/kernel-agent-tdx/kernel_agent.o /home/neo/smu/tdx/WKDIR/kernel-agent-tdx/kernel_agent.mod.o ;  true

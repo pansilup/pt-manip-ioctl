@@ -12,6 +12,9 @@
 #include <asm/pgtable.h>     // For page table manipulation macros
 #include <linux/highmem.h>   //for kmap_atomic()
 
+#include <linux/gfp.h>       //for alloc_page
+#include <linux/mm.h>
+
 #include "kernel_agent.h"
 #include "kdefs.h"
 #include "../simTDX/seamManager/krover_manager.h"
@@ -33,6 +36,25 @@ unsigned long read_int3(void){
     return cr3_val;
 }
 
+ulong check_for_adr_space_overlaps(ulong * pml4){
+    ulong count, pml4_idx;
+
+    count = 0;
+    while((seam_adr_k[count].seam_va != 0) && (count < TDXMODULE_MAPPED_PAGE_COUNT)){
+
+        pml4_idx = (seam_adr_k[count].seam_va >> PML4_IDX_SHIFT) & PGT_IDX_MASK;
+
+        if(pml4[pml4_idx] & PDE64_PRESENT){
+            LOG("PML4 idx: %lu already present in user PTs\n", pml4_idx);
+            return 0;
+        }
+        count++;
+    }
+    return count;
+
+}
+
+
 static ulong *pa_to_va(ulong pa){
 
     unsigned pfn;
@@ -50,6 +72,7 @@ static void pa_to_va_free(void *va){
     kunmap_atomic(va);
 }
 
+
 // /*given a kernel va, translate and find the pa*/
 // static ulong translate_to_pa(ulong va, ulong *page_size, ulong *pml4){
 
@@ -64,7 +87,12 @@ static void pa_to_va_free(void *va){
 static int update_page_tables(ulong arg){
     unsigned long cr3_kernel;
     ulong *pml4_kernel_va, *pml4_user_va, pml4_kernel_pa, pml4_user_pa;
-    ulong page_size, user_data_size;
+    ulong page_size, user_data_size, seam_adr_count;
+    ulong pml4_idx, pdpt_idx, pd_idx, pt_idx;
+    ulong *pml4, *pdpt, *pd, *pt, last_pdpt, last_pd, last_pt;
+    ulong pdpt_pa, pd_pa, pt_pa, page_pa, seam_va, seam_pg_count;
+    struct page *pg;
+
     // int idx;
     // unsigned long *tbl;
     // ulong *tmp;
@@ -87,9 +115,52 @@ static int update_page_tables(ulong arg){
     LOG("copy_from_user SUCCESS\n");
 
     // pml4_kernel_va  = pa_to_va(pml4_kernel_pa);
-    pml4_user_va = pa_to_va(pml4_user_pa);
-    LOG("pml4_user_va: %lx\n", pml4_user_va);
-    pa_to_va_free((void *)pml4_user_va);
+    pml4 = pa_to_va(pml4_user_pa);
+    LOG("pml4_user_va: %lx\n", (ulong)pml4);
+
+    seam_pg_count = check_for_adr_space_overlaps(pml4);
+    if(seam_pg_count == 0 || seam_pg_count >= TDXMODULE_MAPPED_PAGE_COUNT){
+        LOG("seam_page_count is invalid\n");
+        pa_to_va_free((void *)pml4);
+        return -1;
+    }
+    LOG("seam_pg_count: %lu\n", seam_pg_count);
+
+    seam_adr_count = 0;
+    while(seam_adr_count < seam_pg_count){
+
+        seam_va = seam_adr_k[seam_adr_count].seam_va;
+        pml4_idx = (seam_va >> PML4_IDX_SHIFT) & (PGT_IDX_MASK);
+        LOG("seam va: %lx pml4_idx: %lu", seam_va, pml4_idx);
+        if(pml4[pml4_idx] & PDE64_PRESENT){ /*if entry is present, use the existing PDPT*/
+            pdpt_pa = pml4[pml4_idx] & PTE_TO_PA_MASK;
+            pdpt = pa_to_va(pdpt_pa);
+            LOG("pdpt pa: %lx\n", pdpt_pa);
+            LOG("pdpt :%lu\n", (ulong)pdpt);
+
+            pml4[pml4_idx] |= PDE64_PRESENT;
+        }
+        else{ /*if entry is not present, allocate PDPT*/
+            LOG("allocating new pdpt pg\n");
+            pg = alloc_page(GFP_KERNEL | __GFP_ZERO);
+            if(!pg){
+                LOG("alloc_page for pdpt error");
+                return -1;
+            }
+            pdpt_pa = page_to_phys(pg);
+            pdpt = page_address(pg);
+            LOG("pdpt pa: %lx\n", pdpt_pa);
+            LOG("pdpt :%lu\n", (ulong)pdpt);
+
+		    pml4[pml4_idx] = PDE64_PRESENT | PDE64_RW | PDE64_USER | pdpt_pa;
+        }
+
+        break;
+        seam_adr_count++;
+    }
+    pa_to_va_free((void *)pml4);
+
+
     // tmp = (ulong *)current->active_mm->pgd;
     // pml4_kernel_pa = translate_to_pa(pml4_kernel_va, &page_size, pml4_kernel_pa);
     // pgd_user_va    = (ulong *)((unsigned long)pgd_kernel | CR3_KERNEL_TO_USER_MASK);
