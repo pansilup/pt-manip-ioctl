@@ -6,26 +6,20 @@
 #include <linux/uaccess.h>
 #include <linux/kconfig.h>
 
-#include <asm/cpufeature.h>  // For boot_cpu_has()
+#include <asm/cpufeature.h>
 #include <linux/sched.h>
-#include <linux/mm.h>        // For `pgd_t` and related definitions
-#include <asm/pgtable.h>     // For page table manipulation macros
-#include <linux/highmem.h>   //for kmap_atomic()
+#include <linux/mm.h>        
+#include <asm/pgtable.h>
+#include <linux/highmem.h>
 
-#include <linux/gfp.h>       //for alloc_page
+#include <linux/gfp.h>
 #include <linux/mm.h>
 #include <asm/io.h>
+#include <linux/highmem.h>
 
 #include "kernel_agent.h"
 #include "kdefs.h"
 #include "../simTDX/seamManager/krover_manager.h"
-
-#include <linux/highmem.h>
-
-#define CR3_KERNEL_TO_USER_MASK 0x1000UL /*If the 12th bit is clear, kernel CR3. Add the mask to get user CR3*/
-#define PDE64_PRESENT 1UL
-
-#define LOG(...) printk("kernel_agent: " __VA_ARGS__)
 
 typedef unsigned long ulong;
 
@@ -63,7 +57,7 @@ ulong do_seam_va_sanity_checks(ulong * pml4){
 
 }
 
-
+/*
 static ulong *pa_to_va(ulong pa){
 
     unsigned pfn;
@@ -79,71 +73,7 @@ static ulong *pa_to_va(ulong pa){
 
 static void pa_to_va_free(void *va){
     kunmap_atomic(va);
-}
-
-
-// /*given a kernel va, translate and find the pa*/
-// static ulong translate_to_pa(ulong va, ulong *page_size, ulong *pml4){
-
-// 	uint64_t pdpt_pa, pd_pa, pt_pa;
-// 	uint64_t *pdpt, *pd, *pt;
-// 	uint32_t pml4_idx, pdpt_idx, pd_idx, pt_idx;
-
-
-
-// }
-
-/*
-if(pml4[pml4_idx] & PDE64_PRESENT){ /if entry is present, use the existing PDPT
-    pdpt_pa = pml4[pml4_idx] & PTE_TO_PA_MASK;
-    pdpt = phys_to_virt(pdpt_pa);
-    LOG("pdpt pa: %lx\n", pdpt_pa);
-    LOG("pdpt :%lu\n", (ulong)pdpt);
-}
-else{ //if entry is not present, allocate PDPT
-    LOG("allocating new pdpt pg\n");
-    pg = alloc_page(GFP_KERNEL | __GFP_ZERO);
-    if(!pg){
-        LOG("alloc_page for pdpt error");
-        return -1;
-    }
-    pdpt_pa = page_to_phys(pg);
-    pdpt = page_address(pg);
-    LOG("pdpt pa: %lx\n", pdpt_pa);
-    LOG("pdpt :%lu\n", (ulong)pdpt);
-
-    pml4[pml4_idx] = PDE64_PRESENT | PDE64_RW | PDE64_USER | pdpt_pa;
-}
-*/
-
-// #include <linux/uaccess.h>
-
-// static unsigned long get_phys_addr(void *user_va) {
-//     struct mm_struct *mm = current->mm;
-//     unsigned long phys_addr = 0;
-//     pte_t *pte;
-//     pmd_t *pmd;
-//     pud_t *pud;
-//     pgd_t *pgd;
-//     unsigned long addr = (unsigned long)user_va;
-
-//     pgd = pgd_offset(mm, addr);
-//     if (pgd_none(*pgd) || unlikely(pgd_bad(*pgd)))
-//         return 0;
-//     pud = pud_offset(pgd, addr);
-//     if (pud_none(*pud) || unlikely(pud_bad(*pud)))
-//         return 0;
-//     pmd = pmd_offset(pud, addr);
-//     if (pmd_none(*pmd) || unlikely(pmd_bad(*pmd)))
-//         return 0;
-//     pte = pte_offset(pmd, addr);
-//     if (pte_none(*pte) || unlikely(pte_bad(*pte)))
-//         return 0;
-
-//     phys_addr = pte_pfn(*pte) << PAGE_SHIFT | (addr & ~PAGE_MASK);
-
-//     return phys_addr;
-// }
+}*/
 
 /*Working, but we are using the shorter vertion using kernel's inbuilt functions
 static ulong get_physical_address(ulong *pml4, ulong va, ulong page_size){
@@ -200,7 +130,7 @@ static ulong get_physical_address(ulong *pml4, ulong va, ulong page_size){
     return page_pa;
 }*/
 
-static unsigned long get_physical_address(void *user_address)
+static unsigned long get_physical_address(ulong user_address)
 {
     struct page *page;
     unsigned long phys_addr = 0;
@@ -209,14 +139,14 @@ static unsigned long get_physical_address(void *user_address)
     /*get_user_pages_fast() function provides the physical pages from user-space 
     virtual addresses. 
     The pages are pinned, meaning the kernel will ensure they remain in physical 
-    memory for     the duration of the operation. This prevents the memory from 
-    being swapped out or otherwise moved.     The function returns a reference to 
+    memory for the duration of the operation. This prevents the memory from 
+    being swapped out or otherwise moved. The function returns a reference to 
     the pages, and we should manage this reference correctly. If we pin a page, 
     we need to release it later using put_page() to decrement the reference 
     count and allow it to be swapped out or freed if necessary*/
-    ret = get_user_pages_fast((unsigned long)user_address, 1, FOLL_WRITE, &page);
+    ret = get_user_pages_fast(user_address, 1, FOLL_WRITE, &page);
     if (ret > 0) {
-        phys_addr = page_to_phys(page) + ((unsigned long)user_address & ~PAGE_MASK);
+        phys_addr = page_to_phys(page) + (user_address & ~PAGE_MASK);
         put_page(page); /*this is essential to unpin the page.*/
     }
 
@@ -231,20 +161,20 @@ static ulong *update_pgt(ulong *pgt, ulong idx){
         if(pgt[idx] & PDE64_PRESENT){ /*if entry is present, use the existing next level PGT*/
             next_pgt_pa = pgt[idx] & PTE_TO_PA_MASK;
             next_pgt = (ulong *)phys_to_virt(next_pgt_pa);
-            //LOG("next level pgt pa: %lx\n", next_pgt_pa);
-            //LOG("next level pgt :%lx\n", (ulong)next_pgt);
+            LOGD("next level pgt pa: %lx\n", next_pgt_pa);
+            LOGD("next level pgt :%lx\n", (ulong)next_pgt);
         }
         else{ /*if entry is not present, allocate next level PGT*/
-            //LOG("allocating new pg\n");
+            LOGD("allocating new pg\n");
             pg = alloc_page(GFP_KERNEL | __GFP_ZERO);
             if(!pg){
                 LOG("alloc_page for pgt error");
-                return -1;
+                return 0;
             }
             next_pgt_pa = page_to_phys(pg);
             next_pgt = page_address(pg);
-            //LOG("next level pgt pa: %lx\n", next_pgt_pa);
-            //LOG("next level pgt :%lx\n", (ulong)next_pgt);
+            LOGD("next level pgt pa: %lx\n", next_pgt_pa);
+            LOGD("next level pgt :%lx\n", (ulong)next_pgt);
 
 		    pgt[idx] = PDE64_PRESENT | PDE64_RW | PDE64_USER | next_pgt_pa;
         }
@@ -253,21 +183,15 @@ static ulong *update_pgt(ulong *pgt, ulong idx){
 }
 
 static int update_page_tables(ulong arg){
-    unsigned long cr3_kernel;
-    ulong *pml4_kernel_va, *pml4_user_va, pml4_kernel_pa, pml4_user_pa;
-    ulong page_size, user_data_size, seam_adr_count;
-    ulong pml4_idx, pdpt_idx, pd_idx, pt_idx;
-    ulong *pml4, *pdpt, *pd, *pt, last_pdpt, last_pd, last_pt;
-    ulong pdpt_pa, pd_pa, pt_pa, page_pa;
-    ulong seam_va, seam_pg_sz, seam_pg_count;
-    struct page *pg;
 
-    // int idx;
-    // unsigned long *tbl;
-    // ulong *tmp;
-    LOG("arg: %lx\n", arg);
+    ulong *pml4_kernel_va, pml4_kernel_pa, pml4_user_pa;
+    ulong user_data_size, seam_adr_count;
+    ulong pml4_idx, pdpt_idx, pd_idx, pt_idx;
+    ulong *pml4, *pdpt, *pd, *pt;
+    ulong seam_va, page_pa, seam_pg_count;
+
+    LOG("ioctl arg: %lx\n", arg);
     LOG("task name: %s\n", current->comm);
-    LOG("active_mm: %lx\n", (unsigned long)current->active_mm);
 
     pml4_kernel_pa = read_int3() & PA_TO_PAGE_ADR_MASK;
     pml4_user_pa = pml4_kernel_pa | CR3_KERNEL_TO_USER_MASK;
@@ -285,7 +209,6 @@ static int update_page_tables(ulong arg){
 
     pml4_kernel_va  = phys_to_virt(pml4_kernel_pa);
     LOG("pml4_kernel_va: %lx\n", (ulong)pml4_kernel_va);
-
     pml4 = phys_to_virt(pml4_user_pa);
     LOG("pml4_user_va: %lx\n", (ulong)pml4);
 
@@ -300,25 +223,33 @@ static int update_page_tables(ulong arg){
     while(seam_adr_count < seam_pg_count){
 
         seam_va = seam_adr_k[seam_adr_count].seam_va;
-        // page_pa = translate_va(pml4, seam_adr_k[seam_adr_count].host_va, seam_adr_k[seam_adr_count].page_size);
         page_pa = get_physical_address(seam_adr_k[seam_adr_count].host_va);
         if(!page_pa){
             LOG("PT translation error\n");
             return -1;
         }
-        //LOG("%03lu seam va %03lu: %lx -----------------------------------------\n",seam_adr_count, seam_va);
+        LOGD("%03lu seam va %03lu: %lx -----------------------------------------\n",seam_adr_count, seam_va);
 
         pml4_idx = (seam_va >> PML4_IDX_SHIFT) & (PGT_IDX_MASK);
-        //LOG("pml4_idx: %lu", pml4_idx);
+        LOGD("pml4_idx: %lu", pml4_idx);
         pdpt = update_pgt(pml4, pml4_idx);
+        if(!pdpt){
+            return -1;
+        }
 
         pdpt_idx = (seam_va >> PDPT_IDX_SHIFT) & (PGT_IDX_MASK);
-        //LOG("pdpt_idx: %lu\n", pdpt_idx);
+        LOGD("pdpt_idx: %lu\n", pdpt_idx);
         pd  = update_pgt(pdpt, pdpt_idx);
+        if(!pd){
+            return -1;
+        }
 
         pd_idx  = (seam_va >> PD_IDX_SHIFT) & (PGT_IDX_MASK);
-        //LOG("pd_idx: %lu\n", pd_idx);
+        LOGD("pd_idx: %lu\n", pd_idx);
         pt  = update_pgt(pd, pd_idx);
+        if(!pt){
+            return -1;
+        }
 
         pt_idx  = (seam_va >> PT_IDX_SHIFT) & (PGT_IDX_MASK);
         if(pt[pt_idx] & PDE64_PRESENT){
@@ -327,38 +258,18 @@ static int update_page_tables(ulong arg){
         }
         pt[pt_idx] = PDE64_PRESENT | PDE64_RW | PDE64_USER | page_pa;
 
-        //break;
         seam_adr_count++;
-
     }
-    // pa_to_va_free((void *)pml4);
 
-
-    // tmp = (ulong *)current->active_mm->pgd;
-    // pml4_kernel_pa = translate_to_pa(pml4_kernel_va, &page_size, pml4_kernel_pa);
-    // pgd_user_va    = (ulong *)((unsigned long)pgd_kernel | CR3_KERNEL_TO_USER_MASK);
-    // LOG("pgd kernel: %lx pa: %lx\n", pgd_kernel, (unsigned long)virt_to_phys((void *)pgd_kernel));
-    // LOG("pgd user  : %lx pa: %lx\n", (unsigned long)pgd_user, (unsigned long)virt_to_phys((void *)pgd_user));
-
-    // LOG("Printing kernel pml4 entries present...");
-    // idx = 0;
-    // tbl = (unsigned long *)pml4_kernel_va;
-    // while(idx < 512){
-    //     if(tbl[idx] & PDE64_PRESENT){
-    //         LOG("idx: %03d value: %lx\n", idx, tbl[idx]);
-    //     }
-    //     idx++;
-    // }
-    
-    // LOG("Printing user pml4 entries present...");
-    // idx = 0;
-    // tbl = tmp;
-    // while(idx < 512){
-    //     if(tbl[idx] & PDE64_PRESENT){
-    //         LOG("idx: %03d value: %lx\n", idx, tbl[idx]);
-    //     }
-    //     idx++;
-    // }
+    /*LOG("Printing kernel pml4 entries present...");
+    idx = 0;
+    tbl = (unsigned long *)pml4_kernel_va;
+    while(idx < 512){
+        if(tbl[idx] & PDE64_PRESENT){
+            LOG("idx: %03d value: %lx\n", idx, tbl[idx]);
+        }
+        idx++;
+    }*/
 
     return 0;
 }

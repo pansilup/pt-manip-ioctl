@@ -3,7 +3,7 @@
 #define __KDEFS_H
 
 /* 64-bit page * entry bits */
-#define PDE64_PRESENT 1
+#define PDE64_PRESENT       1
 #define PDE64_RW (1U << 1)
 #define PDE64_USER (1U << 2)
 #define PDE64_ACCESSED (1U << 5)
@@ -25,13 +25,21 @@
 #define PG_SIZE_2M          0x200000UL
 
 
-#define PA_TO_PAGE_ADR_MASK 0xfffffffffffff000UL
+#define PA_TO_PAGE_ADR_MASK     0xfffffffffffff000UL
+#define CR3_KERNEL_TO_USER_MASK 0x1000UL /*If the 12th bit is clear, kernel CR3. Add the mask to get user CR3*/
 
 #define LOG_ON
 #ifdef LOG_ON
-    #define LOG(...) printf(__VA_ARGS__)
+    #define LOG(...) printk("kernel_agent: " __VA_ARGS__)
 #else
     #define LOG(f, ...)
+#endif
+
+/*#define LOG_DEBUG_ON*/
+#ifdef LOG_DEBUG_ON
+    #define LOGD(...) printk("kernel_agent: " __VA_ARGS__)
+#else
+    #define LOGD(f, ...)
 #endif
 
 #endif
