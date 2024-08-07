@@ -1,0 +1,1 @@
+cmd_/home/neo/smu/tdx/WKDIR/kernel-agent-tdx/Module.symvers := sed 's/\.ko$$/\.o/' /home/neo/smu/tdx/WKDIR/kernel-agent-tdx/modules.order | scripts/mod/modpost -m   -o /home/neo/smu/tdx/WKDIR/kernel-agent-tdx/Module.symvers -e -i Module.symvers   -T -

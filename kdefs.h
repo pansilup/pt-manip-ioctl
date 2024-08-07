@@ -18,8 +18,12 @@
 #define PT_IDX_SHIFT        12
 #define PGT_IDX_MASK		0x1ffUL
 #define PAGE_ADR_MASK		0xfffffffffffff000
-#define PTE_TO_PA_MASK		0xfffff000UL
+#define PTE_TO_PA_MASK		0xfffffff000UL
 #define LAST_32_BITS		0xffffffffUL
+
+#define PG_SIZE_4K          0x1000UL
+#define PG_SIZE_2M          0x200000UL
+
 
 #define PA_TO_PAGE_ADR_MASK 0xfffffffffffff000UL
 
