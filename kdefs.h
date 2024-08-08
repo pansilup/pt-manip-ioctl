@@ -42,4 +42,7 @@
     #define LOGD(f, ...)
 #endif
 
+/*#define PRINT_USER_PML4_AT_END*/
+
+
 #endif

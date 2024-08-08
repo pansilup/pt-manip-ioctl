@@ -33,10 +33,25 @@ unsigned long read_int3(void){
     return cr3_val;
 }
 
-ulong do_seam_va_sanity_checks(ulong * pml4){
+#ifdef PRINT_USER_PML4_AT_END
+static void print_pml4(ulong *pml4){
+
+    int idx;
+
+    LOG("Printing pml4 entries present...");
+    idx = 0;
+    while(idx < 512){
+        if(pml4[idx] & PDE64_PRESENT){
+            LOG("idx: %03d value: %lx\n", idx, pml4[idx]);
+        }
+        idx++;
+    }
+}
+#endif
+
+static ulong do_seam_va_sanity_checks(ulong * pml4){
     ulong count, pml4_idx;
 
-    
     count = 0;
     while((seam_adr_k[count].seam_va != 0) && (count < TDXMODULE_MAPPED_PAGE_COUNT)){
     
@@ -190,34 +205,36 @@ static int update_page_tables(ulong arg){
     ulong *pml4, *pdpt, *pd, *pt;
     ulong seam_va, page_pa, seam_pg_count;
 
-    LOG("ioctl arg: %lx\n", arg);
-    LOG("task name: %s\n", current->comm);
+    printk("\n");
+    LOG("IOCTL_UPDATE_PT, RECEIVED ...\n");
+    LOG("task name\t\t: %s\n", current->comm);
 
     pml4_kernel_pa = read_int3() & PA_TO_PAGE_ADR_MASK;
     pml4_user_pa = pml4_kernel_pa | CR3_KERNEL_TO_USER_MASK;
-    LOG("cr3_kernel: %lx cr3 user:%lx\n", pml4_kernel_pa, pml4_user_pa);
+
+    pml4_kernel_va  = phys_to_virt(pml4_kernel_pa);
+    pml4 = phys_to_virt(pml4_user_pa);
+    LOG("cr3_kernel\t\t: %lx\n", pml4_kernel_pa);
+    LOG("cr3_user\t\t: %lx\n", pml4_user_pa);
+    LOG("pml4_kernel_va\t: %lx\n", (ulong)pml4_kernel_va);
+    LOG("pml4_user_va\t\t: %lx\n", (ulong)pml4);
 
     user_data_size = sizeof(seam_adr_k);
-    LOG("user data size: 0x%lx\n", user_data_size);
-
+    LOG("ioctl arg\t\t: %lx\n", arg);
+    LOG("user data size\t: 0x%lx\n", user_data_size);
     /*copy_from_user returns the number of bytes it could not copy. So at success : return 0*/
     if(copy_from_user((void *)seam_adr_k, (const void __user *)arg, user_data_size)){
         LOG("copy_from_user ERR\n");
         return -1;
     }
-    LOG("copy_from_user SUCCESS\n");
-
-    pml4_kernel_va  = phys_to_virt(pml4_kernel_pa);
-    LOG("pml4_kernel_va: %lx\n", (ulong)pml4_kernel_va);
-    pml4 = phys_to_virt(pml4_user_pa);
-    LOG("pml4_user_va: %lx\n", (ulong)pml4);
+    LOG("copy_from_user \t: SUCCESS\n");
 
     seam_pg_count = do_seam_va_sanity_checks(pml4);
     if(seam_pg_count == 0 || seam_pg_count >= TDXMODULE_MAPPED_PAGE_COUNT){
         LOG("do_seam_va_sanity_checks Failed\n");
         return -1;
     }
-    LOG("seam_pg_count: %lu\n", seam_pg_count);
+    LOG("seam_pg_count\t: %lu\n", seam_pg_count);
 
     seam_adr_count = 0;
     while(seam_adr_count < seam_pg_count){
@@ -261,15 +278,10 @@ static int update_page_tables(ulong arg){
         seam_adr_count++;
     }
 
-    /*LOG("Printing kernel pml4 entries present...");
-    idx = 0;
-    tbl = (unsigned long *)pml4_kernel_va;
-    while(idx < 512){
-        if(tbl[idx] & PDE64_PRESENT){
-            LOG("idx: %03d value: %lx\n", idx, tbl[idx]);
-        }
-        idx++;
-    }*/
+#ifdef PRINT_USER_PML4_AT_END
+    LOG("print user pml4 after PT updates\n");
+    print_pml4(pml4);
+#endif
 
     return 0;
 }
@@ -281,7 +293,7 @@ static long ioctl_handler(struct file *file, unsigned int ioctl_command, unsigne
             if(update_page_tables(arg) != 0){
                 return -EINVAL;
             }
-            LOG("update_page_tables: SUCCESS\n");
+            LOG("IOCTL_UPDATE_PT\t: SUCCESS\n");
         } break;
         default: {
             return -EINVAL;
@@ -307,6 +319,7 @@ static int __init agent_init(void){
 
     /*check if PTI is enabled for the kernel dung compilation*/
     if(IS_ENABLED(CONFIG_PAGE_TABLE_ISOLATION)){
+        printk("\n");
         LOG("CONFIG_PAGE_TABLE_ISOLATION is enabled.\n");
 
         /*Check if the Page Table Isolation is turned on at boot time and is effective*/
@@ -344,4 +357,12 @@ module_exit(agent_exit);
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("pansilu pitigalaarachchi");
-MODULE_DESCRIPTION("Upon the request of KRover+ process, agent will update PTs");
+MODULE_DESCRIPTION(
+    "This module exposes an ioctl() to user space. Upon the request of the user    "
+    "process, agent will update the PTs of the user process to provide mappings    "
+    "for a given list of VAs provided in ioctl() arguments.                        "
+    ""
+    "Usage: Include the kernel_agent.h and implement the user space ioctl() issuer."
+    "ioctl(fd, IOCTL_UPDATE_PT, struct s_adr *buffer);                             "
+    "buffer of type s_adr to be prepared by user space                             "
+);
