@@ -19,7 +19,7 @@
 
 #include "kernel_agent.h"
 #include "kdefs.h"
-#include "../simTDX/seamManager/krover_manager.h"
+// #include "../simTDX/seamManager/krover_manager.h"
 
 typedef unsigned long ulong;
 
